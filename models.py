@@ -1,28 +1,18 @@
 # models.py
 
-import os
-import json
-import uuid
 from dotenv import load_dotenv
 from langchain import LLMChain, PromptTemplate
 from langchain.chat_models import ChatOpenAI
-
+from config import OPENROUTER_API_KEY, OPENROUTER_API_BASE
 load_dotenv()
 
 # ─── OpenRouter LLM Setup ──────────────────────────────────────────────────────
-api_key  = os.getenv("OPENROUTER_API_KEY")
-api_base = os.getenv(
-    "OPENROUTER_API_BASE",
-    "https://openrouter.ai/v1/chat/completions"
-)
-if not api_key:
-    raise ValueError("You must set OPENROUTER_API_KEY")
 
 llm = ChatOpenAI(
     model_name="deepseek/deepseek-chat:free",
     temperature=0,
-    openai_api_key=api_key,
-    openai_api_base=api_base
+    openai_api_key=OPENROUTER_API_KEY,
+    openai_api_base=OPENROUTER_API_BASE
 )
 
 # ─── Prompt & Chain: Clustering ───────────────────────────────────────────────
@@ -66,20 +56,3 @@ Return JSON: {{ "title": "...", "description": "..." }}
     input_variables=["topic", "left_summary", "right_summary"]
 )
 unified_chain = LLMChain(llm=llm, prompt=unified_prompt)
-
-async def cluster_messages(message_topics, topic_threshold):
-    """
-    message_topics: list of (channel_id, message_text)
-    Returns (valid_clusters, id_map):
-      - valid_clusters: { topic_title: [ {id,channel}, ... ] } filtered by threshold
-      - id_map: { id: {"channel":..., "message":...} }
-    """
-    # 1) Annotate each message with a random UUID
-    id_map = {}
-    lines  = []
-    for chan, msg in message_topics:
-        mid = str(uuid.uuid4())
-        id_map[mid] = {"channel": chan, "message": msg}
-        lines.append(f"[{mid}][{chan}] {msg}")
-
-    # 2

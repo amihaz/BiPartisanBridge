@@ -21,14 +21,15 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT_ID    = os.getenv("TELEGRAM_BOT_ID")
 
 # OpenRouter (LLM) Config
-env_api_key       = os.getenv("OPENROUTER_API_KEY")
-env_api_base      = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/v1/chat/completions")
+OPENROUTER_API_KEY  = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_BASE = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/v1/chat/completions")
+
 
 # CLI Constants
 def validate_config():
     if not TELEGRAM_TOKEN:
         raise ValueError("TELEGRAM_TOKEN must be set")
-    if not env_api_key:
+    if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY must be set")
 
 # Automatically validate on import
