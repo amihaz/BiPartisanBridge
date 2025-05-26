@@ -1,0 +1,4 @@
+telethon
+langchain
+openai
+python-dotenv
