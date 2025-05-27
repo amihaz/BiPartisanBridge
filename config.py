@@ -22,7 +22,7 @@ TELEGRAM_BOT_ID    = os.getenv("TELEGRAM_BOT_ID")
 
 # OpenRouter (LLM) Config
 OPENROUTER_API_KEY  = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_API_BASE = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/v1/chat/completions")
+OPENROUTER_API_BASE = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/v1")
 
 
 # CLI Constants

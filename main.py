@@ -1,8 +1,12 @@
+# main.py
+
 import asyncio
 import json
 from datetime import datetime, timedelta
 from collections import defaultdict
+import traceback
 from telethon import TelegramClient, events
+
 from config import (
     TELEGRAM_API_ID,
     TELEGRAM_API_HASH,
@@ -12,129 +16,165 @@ from config import (
     TOPIC_THRESHOLD,
     MESSAGE_TTL_HOURS,
 )
-from models import summarization_chain, unified_chain, cluster_chain
-from langchain.chains import LLMChain
-from langchain_core.prompts import PromptTemplate
-import json
-import uuid
+
+from models import (
+    cluster_messages_llm,
+    summarize_messages_llm,
+    
+    create_unified_title_description_llm
+)
 
 # Initialize Telethon client with user session
 client = TelegramClient("session", TELEGRAM_API_ID, TELEGRAM_API_HASH)
 
-# In-memory buffer: channel_id -> list of messages with ts and chan
+# In-memory buffer: channel_id -> list of messages with timestamp and channel info
 channel_buffers = defaultdict(list)
 
 @client.on(events.NewMessage(chats=LEFT_CHANNELS + RIGHT_CHANNELS))
 async def collect(event):
-    print(event)
+    """Collect incoming messages from monitored channels"""
+    print(f"[COLLECT] New message from chat {event.chat_id}")
     chat_id = str(event.chat_id)
     msg = event.message.message
+    
     if msg:
         channel_buffers[chat_id].append({
             "msg": msg,
             "ts": datetime.utcnow(),
             "chan": chat_id
         })
-
-async def cluster_messages(entries, topic_threshold):
-    """
-    Clusters messages using LLM and filters by unique channel threshold.
-
-    Args:
-        entries (list): A list of tuples (channel_id, message_text)
-        topic_threshold (int): Minimum number of unique channels per topic to include
-
-    Returns:
-        valid_clusters (dict): {topic_title: [ {"id": ..., "channel": ...}, ... ]}
-        id_map (dict): {uuid: {"channel": ..., "message": ...}}
-    """
-
-    # Assign unique IDs to each message
-    id_map = {}
-    lines = []
-    for chan, msg in entries:
-        mid = str(uuid.uuid4())
-        id_map[mid] = {"channel": chan, "message": msg}
-        lines.append(f"[{mid}][{chan}] {msg}")
-
-    # Build batch for the LLM
-    batch = "\n".join(lines)
-
-    # Call the LLM via the cluster_chain
-    try:
-        clusters_str = await cluster_chain.arun(messages=batch)
-        clusters = json.loads(clusters_str)
-    except Exception as e:
-        print(f"[cluster_messages] Failed to parse LLM response: {e}")
-        return {}, id_map
-
-    # Filter by unique channel threshold
-    valid_clusters = {}
-    for title, items in clusters.items():
-        unique_chans = {item["channel"] for item in items}
-        if len(unique_chans) >= topic_threshold:
-            valid_clusters[title] = items
-
-    return valid_clusters, id_map
+        print(f"[COLLECT] Added message to buffer. Buffer size for {chat_id}: {len(channel_buffers[chat_id])}")
 
 async def summarize_loop():
-    await asyncio.sleep(10)
+    """Main processing loop that runs every 10 seconds"""
+    await asyncio.sleep(10)  # Initial delay
     ttl = timedelta(hours=MESSAGE_TTL_HOURS)
+    
     while True:
-        await asyncio.sleep(600)
-        print("channel_buffers: ", channel_buffers)
-        now = datetime.utcnow()
-        for chan in list(channel_buffers):
-            channel_buffers[chan] = [e for e in channel_buffers[chan] if now - e["ts"] < ttl]
-        print("channel_buffers after ttl: ", channel_buffers)
-        entries = [(e["chan"], e["msg"]) for sub in channel_buffers.values() for e in sub]
-        print("entries: ", entries)
-        if not entries:
-            continue
+        try:
+            await asyncio.sleep(10)  # Process every 10 seconds (change to 600 for 10 minutes)
+            print(f"[LOOP] Starting processing cycle at {datetime.utcnow()}")
+            print(f"[LOOP] Current channel_buffers: {dict(channel_buffers)}")
+            
+            # Remove expired messages based on TTL
+            now = datetime.utcnow()
+            for chan in list(channel_buffers):
+                original_count = len(channel_buffers[chan])
+                channel_buffers[chan] = [e for e in channel_buffers[chan] if now - e["ts"] < ttl]
+                new_count = len(channel_buffers[chan])
+                if original_count != new_count:
+                    print(f"[LOOP] Removed {original_count - new_count} expired messages from {chan}")
+            
+            print(f"[LOOP] channel_buffers after TTL cleanup: {dict(channel_buffers)}")
+            
+            # Flatten all messages into entries list
+            entries = [(e["chan"], e["msg"]) for sub in channel_buffers.values() for e in sub]
+            print(f"[LOOP] Total entries to process: {len(entries)}")
+            
+            if not entries:
+                print("[LOOP] No entries to process, continuing...")
+                continue
 
-        valid_clusters, id_map = await cluster_messages(entries, TOPIC_THRESHOLD)
-        print("valid_clusters: ", valid_clusters)
-        print("id_map: ", id_map)
-        if not valid_clusters:
-            continue
+            # Cluster messages using LLM
+            print("[LOOP] Clustering messages...")
+            valid_clusters, id_map = await cluster_messages_llm(entries, TOPIC_THRESHOLD)
+            print(f"[LOOP] Found {len(valid_clusters)} valid clusters")
+            print(f"[LOOP] valid_clusters: {valid_clusters}")
+            
+            if not valid_clusters:
+                print("[LOOP] No valid clusters found, continuing...")
+                continue
 
-        parts = [
-            f"**Topic Digest ({len(valid_clusters)} topics)**",
-            f"Digest of topics mentioned by at least {TOPIC_THRESHOLD} channels."
-        ]
-        processed_ids = set()
+            # Build the digest message
+            parts = [
+                f"**Topic Digest ({len(valid_clusters)} topics)**",
+                f"Digest of topics mentioned by at least {TOPIC_THRESHOLD} channels."
+            ]
+            processed_ids = set()
 
-        for topic, items in valid_clusters.items():
-            left_msgs = [id_map[it["id"]]["message"] for it in items if it["channel"] in LEFT_CHANNELS]
-            right_msgs = [id_map[it["id"]]["message"] for it in items if it["channel"] in RIGHT_CHANNELS]
+            for topic, items in valid_clusters.items():
+                print(f"[LOOP] Processing topic: {topic}")
+                
+                # Separate messages by left/right channels
+                left_msgs = [id_map[it["id"]]["message"] for it in items if it["channel"] in LEFT_CHANNELS]
+                right_msgs = [id_map[it["id"]]["message"] for it in items if it["channel"] in RIGHT_CHANNELS]
+                
+                print(f"[LOOP] Topic '{topic}': {len(left_msgs)} left msgs, {len(right_msgs)} right msgs")
 
-            left_summary = await summarization_chain.arun(topic=topic, text="\n".join(left_msgs)) if left_msgs else ""
-            right_summary = await summarization_chain.arun(topic=topic, text="\n".join(right_msgs)) if right_msgs else ""
+                # Generate summaries for each perspective
+                left_summary = ""
+                right_summary = ""
+                
+                if left_msgs:
+                    print(f"[LOOP] Summarizing left messages for topic: {topic}")
+                    left_summary = await summarize_messages_llm(topic, "\n".join(left_msgs))
+                
+                if right_msgs:
+                    print(f"[LOOP] Summarizing right messages for topic: {topic}")
+                    right_summary = await summarize_messages_llm(topic, "\n".join(right_msgs))
 
-            unified = await unified_chain.arun(
-                topic=topic,
-                left_summary=left_summary,
-                right_summary=right_summary
-            )
-            title_line, desc_line = unified.split("\n", 1)
+                # Create unified title and description
+                print(f"[LOOP] Creating unified title/description for topic: {topic}")
+                unified_result = await create_unified_title_description_llm(topic, left_summary, right_summary)
+                title_line = unified_result["title"]
+                desc_line = unified_result["description"]
 
-            parts.extend([
-                f"## {title_line}\n{desc_line}",
-                f"**Left Perspective:**\n{left_summary}",
-                f"**Right Perspective:**\n{right_summary}"
-            ])
-            processed_ids.update(it["id"] for it in items)
+                # Add to digest parts
+                parts.extend([
+                    f"## {title_line}\n{desc_line}",
+                    f"**Left Perspective:**\n{left_summary}",
+                    f"**Right Perspective:**\n{right_summary}"
+                ])
+                
+                # Track processed message IDs
+                processed_ids.update(it["id"] for it in items)
 
-        final = "\n\n".join(parts)
-        await client.send_message(TARGET_CHANNEL, final)
+            # Send the digest to target channel
+            final_message = "\n\n".join(parts)
+            print(f"[LOOP] Sending digest message to channel {TARGET_CHANNEL}")
+            print(f"[LOOP] Message length: {len(final_message)} characters")
+            
+            await client.send_message(TARGET_CHANNEL, final_message)
+            print("[LOOP] Digest sent successfully!")
 
-        for chan in channel_buffers:
-            channel_buffers[chan] = [e for e in channel_buffers[chan] if e["msg"] not in [id_map[mid]["message"] for mid in processed_ids]]
+            # Remove processed messages from buffers
+            processed_messages = {id_map[mid]["message"] for mid in processed_ids}
+            for chan in channel_buffers:
+                original_count = len(channel_buffers[chan])
+                channel_buffers[chan] = [e for e in channel_buffers[chan] 
+                                       if e["msg"] not in processed_messages]
+                new_count = len(channel_buffers[chan])
+                if original_count != new_count:
+                    print(f"[LOOP] Removed {original_count - new_count} processed messages from {chan}")
+
+        except Exception as e:
+            print(f"[LOOP] Error in summarize_loop: {e}")
+            traceback.print_exc()
+            # Continue the loop even if there's an error
 
 async def main():
+    """Main entry point"""
+    print("[MAIN] Starting Telegram client...")
     await client.start()
+    print("[MAIN] Client started successfully!")
+    
+    print(f"[MAIN] Monitoring channels: LEFT={LEFT_CHANNELS}, RIGHT={RIGHT_CHANNELS}")
+    print(f"[MAIN] Target channel: {TARGET_CHANNEL}")
+    print(f"[MAIN] Topic threshold: {TOPIC_THRESHOLD}")
+    print(f"[MAIN] Message TTL: {MESSAGE_TTL_HOURS} hours")
+    
+    # Start the processing loop
+    print("[MAIN] Starting summarize loop...")
     asyncio.create_task(summarize_loop())
+    
+    print("[MAIN] Bot is running! Press Ctrl+C to stop.")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[MAIN] Bot stopped by user")
+    except Exception as e:
+        print(f"[MAIN] Fatal error: {e}")
+        traceback.print_exc()

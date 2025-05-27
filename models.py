@@ -1,47 +1,148 @@
 # models.py
 
-from dotenv import load_dotenv
-from langchain import LLMChain, PromptTemplate
-from langchain.chat_models import ChatOpenAI
+import openai
+import json
 from config import OPENROUTER_API_KEY, OPENROUTER_API_BASE
-load_dotenv()
 
-# ─── OpenRouter LLM Setup ──────────────────────────────────────────────────────
-
-llm = ChatOpenAI(
-    model_name="deepseek/deepseek-chat:free",
-    temperature=0,
-    openai_api_key=OPENROUTER_API_KEY,
-    openai_api_base=OPENROUTER_API_BASE
+# Initialize OpenAI client for OpenRouter
+openai_client = openai.AsyncOpenAI(
+    api_key=OPENROUTER_API_KEY,
+    base_url=OPENROUTER_API_BASE,
 )
 
-# ─── Prompt & Chain: Clustering ───────────────────────────────────────────────
-cluster_prompt = PromptTemplate(
-    template="""
-Group these annotated messages into clusters describing the same event or topic.
-Return JSON: keys = cluster titles (3–5 words), 
-values = lists of objects {{ "id": "<UUID>", "channel": "<channel_id>" }}.
+async def call_llm(prompt_text):
+    """
+    Direct OpenAI API call to OpenRouter to avoid LangChain compatibility issues
+    
+    Args:
+        prompt_text (str): The prompt to send to the LLM
+        
+    Returns:
+        str: The LLM response content, or None if there was an error
+    """
+    try:
+        response = await openai_client.chat.completions.create(
+            model="deepseek/deepseek-chat:free",
+            messages=[{"role": "user", "content": prompt_text}],
+            temperature=0
+        )
+        print("response: ", response)
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"[call_llm] Error: {e}")
+        return None
+
+async def cluster_messages_llm(entries, topic_threshold):
+    """
+    Clusters messages using LLM and filters by unique channel threshold.
+
+    Args:
+        entries (list): A list of tuples (channel_id, message_text)
+        topic_threshold (int): Minimum number of unique channels per topic to include
+
+    Returns:
+        tuple: (valid_clusters dict, id_map dict)
+            - valid_clusters: {topic_title: [{"id": ..., "channel": ...}, ...]}
+            - id_map: {uuid: {"channel": ..., "message": ...}}
+    """
+    import uuid
+    
+    id_map = {}
+    lines = []
+    
+    # Create unique IDs for each message
+    for chan, msg in entries:
+        mid = str(uuid.uuid4())
+        id_map[mid] = {"channel": chan, "message": msg}
+        lines.append(f"ID: {mid} | Channel: {chan} | Message: {msg}")
+
+    batch = "\n".join(lines)
+    print("[DEBUG] batch:\n", batch)
+
+    # Create the clustering prompt
+    cluster_prompt = f"""
+Group the following messages into clusters describing the same event or topic.
+
+Each message is formatted as:
+ID: <uuid> | Channel: <channel_id> | Message: <text>
+
+Return a JSON object where:
+- Each key is a short cluster title (3–5 words)
+- Each value is a list of objects in this format:
+{{ "id": "<uuid>", "channel": "<channel_id>" }}
 
 Messages:
-{messages}
-""",
-    input_variables=["messages"]
-)
-cluster_chain = LLMChain(llm=llm, prompt=cluster_prompt)
+{batch}
+"""
 
-# ─── Prompt & Chain: Summarization ────────────────────────────────────────────
-summarize_prompt = PromptTemplate(
-    template="""
+    try:
+        response = await call_llm(cluster_prompt)
+        if not response:
+            print("[cluster_messages] No response from LLM")
+            return {}, id_map
+            
+        print(f"[DEBUG] LLM raw output:\n", response)
+        
+        # Clean up the response string if needed
+        response_str = response.strip()
+        if response_str.startswith('```json'):
+            response_str = response_str[7:-3].strip()
+        elif response_str.startswith('```'):
+            response_str = response_str[3:-3].strip()
+        
+        clusters = json.loads(response_str)
+
+    except Exception as e:
+        print(f"[cluster_messages] Failed to parse LLM response: {e}")
+        print(f"[cluster_messages] Raw response: {response}")
+        import traceback
+        traceback.print_exc()
+        return {}, id_map
+
+    # Filter clusters by unique channel threshold
+    valid_clusters = {}
+    for title, items in clusters.items():
+        unique_chans = {item["channel"] for item in items}
+        if len(unique_chans) >= topic_threshold:
+            valid_clusters[title] = items
+
+    return valid_clusters, id_map
+
+async def summarize_messages_llm(topic, messages_text):
+    """
+    Summarize messages for a given topic
+    
+    Args:
+        topic (str): The topic title
+        messages_text (str): The messages to summarize
+        
+    Returns:
+        str: The summary, or empty string if error
+    """
+    if not messages_text.strip():
+        return ""
+        
+    summarize_prompt = f"""
 Summarize the following messages under topic '{topic}':
-{text}
-""",
-    input_variables=["topic", "text"]
-)
-summarization_chain = LLMChain(llm=llm, prompt=summarize_prompt)
+{messages_text}
+"""
+    
+    result = await call_llm(summarize_prompt)
+    return result if result else ""
 
-# ─── Prompt & Chain: Unified Title/Description ───────────────────────────────
-unified_prompt = PromptTemplate(
-    template="""
+async def create_unified_title_description_llm(topic, left_summary, right_summary):
+    """
+    Create a balanced title and description from left and right summaries
+    
+    Args:
+        topic (str): The topic title
+        left_summary (str): Summary from left-leaning sources
+        right_summary (str): Summary from right-leaning sources
+        
+    Returns:
+        dict: {"title": "...", "description": "..."} or fallback values
+    """
+    unified_prompt = f"""
 Topic: {topic}
 
 Left summary:
@@ -52,7 +153,23 @@ Right summary:
 
 Create a balanced title and a neutral description for this topic.
 Return JSON: {{ "title": "...", "description": "..." }}
-""",
-    input_variables=["topic", "left_summary", "right_summary"]
-)
-unified_chain = LLMChain(llm=llm, prompt=unified_prompt)
+"""
+    
+    unified_content = await call_llm(unified_prompt)
+    if not unified_content:
+        return {"title": topic, "description": "No description available"}
+    
+    try:
+        # Try to parse as JSON first
+        unified_json = json.loads(unified_content.strip())
+        return {
+            "title": unified_json.get("title", topic),
+            "description": unified_json.get("description", "")
+        }
+    except json.JSONDecodeError:
+        # Fallback to splitting by newline
+        lines = unified_content.split("\n", 1)
+        return {
+            "title": lines[0] if lines else topic,
+            "description": lines[1] if len(lines) > 1 else ""
+        }
