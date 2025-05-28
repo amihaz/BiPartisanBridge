@@ -22,7 +22,7 @@ async def call_llm(prompt_text):
     """
     try:
         response = await openai_client.chat.completions.create(
-            model="deepseek/deepseek-chat",
+            model="openai/gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt_text}],
             temperature=0
         )
@@ -66,6 +66,7 @@ Group the following messages into clusters describing the same event or topic.
 Each message is formatted as:
 ID: <uuid> | Channel: <channel_id> | Message: <text>
 
+Answer in the same language as the messages.
 Return a JSON object where:
 - Each key is a short cluster title (3–5 words)
 - Each value is a list of objects in this format:
@@ -131,7 +132,7 @@ async def summarize_messages_llm(topic, messages_text):
         return ""
         
     summarize_prompt = f"""
-Summarize the following messages under topic '{topic}':
+Summarize the following messages under topic '{topic}'. Answer always in the same language as the messages.
 {messages_text}
 """
     
@@ -159,7 +160,7 @@ Left summary:
 Right summary:
 {right_summary}
 
-Create a balanced title and a neutral description for this topic.
+Create a balanced title and a neutral description for this topic. Answer always in the same language as the summaries.
 Return a JSON object in the following format: {{ "title": "...", "description": "..." }}
 """
     

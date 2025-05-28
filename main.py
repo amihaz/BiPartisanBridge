@@ -102,13 +102,15 @@ async def summarize_loop():
                 left_summary = ""
                 right_summary = ""
                 
-                if left_msgs:
-                    print(f"[LOOP] Summarizing left messages for topic: {topic}")
-                    left_summary = await summarize_messages_llm(topic, "\n".join(left_msgs))
+                if len(left_msgs) == 0 or len(right_msgs) == 0:
+                    print(f"[LOOP] No messages to summarize for topic: {topic}")
+                    continue
+
+                print(f"[LOOP] Summarizing left messages for topic: {topic}")
+                left_summary = await summarize_messages_llm(topic, "\n".join(left_msgs))
                 
-                if right_msgs:
-                    print(f"[LOOP] Summarizing right messages for topic: {topic}")
-                    right_summary = await summarize_messages_llm(topic, "\n".join(right_msgs))
+                print(f"[LOOP] Summarizing right messages for topic: {topic}")
+                right_summary = await summarize_messages_llm(topic, "\n".join(right_msgs))
 
                 # Create unified title and description
                 print(f"[LOOP] Creating unified title/description for topic: {topic}")
@@ -120,32 +122,31 @@ async def summarize_loop():
                 # Add to digest parts
                 parts.extend([
                     f"**{title_line}**\n\n{desc_line}",
-                    f"**Left Perspective:**\n{left_summary}",
-                    f"**Right Perspective:**\n{right_summary}"
+                    f"**מחנה השמאל**\n{left_summary}",
+                    f"**מחנה הימין**\n{right_summary}"
                 ])
                 
                 print(f"[LOOP] Parts: {parts}")
 
                 # Track processed message IDs
                 processed_ids.update(it["id"] for it in items)
-
             # Send the digest to target channel
-            final_message = "\n\n".join(parts)
-            print(f"[LOOP] Sending digest message to target channel {TARGET_CHANNEL_ID}")
-            print(f"[LOOP] Final message: {final_message}")
-            
-            await client.send_message(TARGET_CHANNEL_ID, final_message)
-            print("[LOOP] Digest sent successfully!")
+                final_message = "\n\n".join(parts)
+                print(f"[LOOP] Sending digest message to target channel {TARGET_CHANNEL_ID}")
+                print(f"[LOOP] Final message: {final_message}")
+                
+                await client.send_message(TARGET_CHANNEL_ID, final_message)
+                print("[LOOP] Digest sent successfully!")
 
-            # Remove processed messages from buffers
-            processed_messages = {id_map[mid]["message"] for mid in processed_ids}
-            for chan in channel_buffers:
-                original_count = len(channel_buffers[chan])
-                channel_buffers[chan] = [e for e in channel_buffers[chan] 
-                                       if e["msg"] not in processed_messages]
-                new_count = len(channel_buffers[chan])
-                if original_count != new_count:
-                    print(f"[LOOP] Removed {original_count - new_count} processed messages from {chan}")
+                # Remove processed messages from buffers
+                processed_messages = {id_map[mid]["message"] for mid in processed_ids}
+                for chan in channel_buffers:
+                    original_count = len(channel_buffers[chan])
+                    channel_buffers[chan] = [e for e in channel_buffers[chan] 
+                                        if e["msg"] not in processed_messages]
+                    new_count = len(channel_buffers[chan])
+                    if original_count != new_count:
+                        print(f"[LOOP] Removed {original_count - new_count} processed messages from {chan}")
 
         except Exception as e:
             print(f"[LOOP] Error in summarize_loop: {e}")
