@@ -14,6 +14,7 @@ from config import (
     TARGET_CHANNEL_ID,
     TOPIC_THRESHOLD,
     MESSAGE_TTL_MINUTES,
+    PROCESS_INTERVAL_SECONDS,
 )
 
 from models import (
@@ -51,7 +52,7 @@ async def summarize_loop():
     
     while True:
         try:
-            await asyncio.sleep(60)  # Process every 30 seconds (change to 600 for 10 minutes)
+            await asyncio.sleep(PROCESS_INTERVAL_SECONDS)  # Process every 30 seconds (change to 600 for 10 minutes)
             print(f"[LOOP] Starting processing cycle at {datetime.now(timezone.utc)}")
             print(f"[LOOP] Current channel_buffers: {dict(channel_buffers)}")
             

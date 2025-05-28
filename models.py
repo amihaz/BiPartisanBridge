@@ -61,30 +61,30 @@ async def cluster_messages_llm(entries, topic_threshold):
 
     # Create the clustering prompt
     cluster_prompt = f"""
-You are given a list of messages, each tagged with a unique ID and a channel.
-Your job: group them into topic clusters and output **only** a raw JSON object—nothing else.
+You are given a list of messages, each tagged with a unique ID and a channel.  
+Your job is to group them into topic clusters, but only keep those clusters that appear in at least {topic_threshold} different channels.
 
-Requirements:
-1. Raw JSON only—no markdown, no code fences, no extra text.
-2. JSON object keys (cluster titles) may use only letters, numbers, spaces, and hyphens.
-   - Do not include any double-quote character (") in the titles.
-   - If needed, replace internal quotes with apostrophes (’).
-3. Escape all double quotes in message fields (id or channel) with a backslash.
-4. Follow exactly this format:
+**Requirements:**
+1. Only output **raw JSON**—no markdown fences, no commentary, nothing before or after.
+2. Each JSON key (cluster title) may use only letters, numbers, spaces, and hyphens.  
+   - Do not include any double-quote (") inside titles.  
+   - Replace any natural-language quote with an apostrophe (’).
+3. Escape every double-quote in the `id` or `channel` fields as `\"`.
+4. Answer in the same language as the messages.
+5. Follow exactly this schema:
 
 {{
   "<Cluster Title>": [
     {{ "id": "<uuid>", "channel": "<channel_id>" }},
-    …  
+    …
   ],
-  …  
+  …
 }}
 
 Here are the messages to cluster:
 {batch}
-
-Answer in the same language as the messages.
 """
+
 
     try:
         response = await call_llm(cluster_prompt)
@@ -170,7 +170,8 @@ Left summary:
 Right summary:
 {right_summary}
 
-Create a balanced title and a neutral description for this topic. Answer always in the same language as the summaries.
+Create a balanced title and a neutral description for this topic. 
+Answer always in the same language as the summaries.
 Return a JSON object in the following format: {{ "title": "...", "description": "..." }}
 Return *only* a valid JSON object (no markdown fences).  
 Escape all internal double‐quotes as `\"`.  
