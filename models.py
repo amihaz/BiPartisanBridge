@@ -61,19 +61,29 @@ async def cluster_messages_llm(entries, topic_threshold):
 
     # Create the clustering prompt
     cluster_prompt = f"""
-Group the following messages into clusters describing the same event or topic.
+You are given a list of messages, each tagged with a unique ID and a channel.
+Your job: group them into topic clusters and output **only** a raw JSON object—nothing else.
 
-Each message is formatted as:
-ID: <uuid> | Channel: <channel_id> | Message: <text>
+Requirements:
+1. Raw JSON only—no markdown, no code fences, no extra text.
+2. JSON object keys (cluster titles) may use only letters, numbers, spaces, and hyphens.
+   - Do not include any double-quote character (") in the titles.
+   - If needed, replace internal quotes with apostrophes (’).
+3. Escape all double quotes in message fields (id or channel) with a backslash.
+4. Follow exactly this format:
+
+{{
+  "<Cluster Title>": [
+    {{ "id": "<uuid>", "channel": "<channel_id>" }},
+    …  
+  ],
+  …  
+}}
+
+Here are the messages to cluster:
+{batch}
 
 Answer in the same language as the messages.
-Return a JSON object where:
-- Each key is a short cluster title (3–5 words)
-- Each value is a list of objects in this format:
-{{ "id": "<uuid>", "channel": "<channel_id>" }}
-
-Messages:
-{batch}
 """
 
     try:
@@ -162,6 +172,8 @@ Right summary:
 
 Create a balanced title and a neutral description for this topic. Answer always in the same language as the summaries.
 Return a JSON object in the following format: {{ "title": "...", "description": "..." }}
+Return *only* a valid JSON object (no markdown fences).  
+Escape all internal double‐quotes as `\"`.  
 """
     
     unified_content = await call_llm(unified_prompt)

@@ -13,7 +13,7 @@ from config import (
     RIGHT_CHANNELS,
     TARGET_CHANNEL_ID,
     TOPIC_THRESHOLD,
-    MESSAGE_TTL_HOURS,
+    MESSAGE_TTL_MINUTES,
 )
 
 from models import (
@@ -40,34 +40,34 @@ async def collect(event):
         channel_buffers[chat_id].append({
             "msg": msg,
             "ts": datetime.now(timezone.utc),
-            "chan": chat_id
+            "channel": chat_id
         })
         print(f"[COLLECT] Added message to buffer. Buffer size for {chat_id}: {len(channel_buffers[chat_id])}")
 
 async def summarize_loop():
     """Main processing loop that runs every 10 seconds"""
     await asyncio.sleep(10)  # Initial delay
-    ttl = timedelta(hours=MESSAGE_TTL_HOURS)
+    ttl = timedelta(minutes=MESSAGE_TTL_MINUTES)
     
     while True:
         try:
-            await asyncio.sleep(10)  # Process every 10 seconds (change to 600 for 10 minutes)
+            await asyncio.sleep(60)  # Process every 30 seconds (change to 600 for 10 minutes)
             print(f"[LOOP] Starting processing cycle at {datetime.now(timezone.utc)}")
             print(f"[LOOP] Current channel_buffers: {dict(channel_buffers)}")
             
             # Remove expired messages based on TTL
             now = datetime.now(timezone.utc)
-            for chan in list(channel_buffers):
-                original_count = len(channel_buffers[chan])
-                channel_buffers[chan] = [e for e in channel_buffers[chan] if now - e["ts"] < ttl]
-                new_count = len(channel_buffers[chan])
+            for channel in list(channel_buffers):
+                original_count = len(channel_buffers[channel])
+                channel_buffers[channel] = [e for e in channel_buffers[channel] if now - e["ts"] < ttl]
+                new_count = len(channel_buffers[channel])
                 if original_count != new_count:
-                    print(f"[LOOP] Removed {original_count - new_count} expired messages from {chan}")
+                    print(f"[LOOP] Removed {original_count - new_count} expired messages from {channel}")
             
             print(f"[LOOP] channel_buffers after TTL cleanup: {dict(channel_buffers)}")
             
             # Flatten all messages into entries list
-            entries = [(e["chan"], e["msg"]) for sub in channel_buffers.values() for e in sub]
+            entries = [(e["channel"], e["msg"]) for sub in channel_buffers.values() for e in sub]
             print(f"[LOOP] Total entries to process: {len(entries)}")
             
             if not entries:
@@ -140,13 +140,13 @@ async def summarize_loop():
 
                 # Remove processed messages from buffers
                 processed_messages = {id_map[mid]["message"] for mid in processed_ids}
-                for chan in channel_buffers:
-                    original_count = len(channel_buffers[chan])
-                    channel_buffers[chan] = [e for e in channel_buffers[chan] 
+                for channel in channel_buffers:
+                    original_count = len(channel_buffers[channel])
+                    channel_buffers[channel] = [e for e in channel_buffers[channel] 
                                         if e["msg"] not in processed_messages]
-                    new_count = len(channel_buffers[chan])
+                    new_count = len(channel_buffers[channel])
                     if original_count != new_count:
-                        print(f"[LOOP] Removed {original_count - new_count} processed messages from {chan}")
+                        print(f"[LOOP] Removed {original_count - new_count} processed messages from {channel}")
 
         except Exception as e:
             print(f"[LOOP] Error in summarize_loop: {e}")
@@ -162,7 +162,7 @@ async def main():
     print(f"[MAIN] Monitoring channels: LEFT={LEFT_CHANNELS}, RIGHT={RIGHT_CHANNELS}")
     print(f"[MAIN] Target channel: {TARGET_CHANNEL_ID}")
     print(f"[MAIN] Topic threshold: {TOPIC_THRESHOLD}")
-    print(f"[MAIN] Message TTL: {MESSAGE_TTL_HOURS} hours")
+    print(f"[MAIN] Message TTL: {MESSAGE_TTL_MINUTES} minutes")
     
     await init_channel_ids(client)
 

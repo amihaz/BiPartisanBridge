@@ -14,7 +14,7 @@ TELEGRAM_API_HASH  = os.getenv("TELEGRAM_APP_HASH")
 
 # Topic processing
 TOPIC_THRESHOLD   = int(os.getenv("TOPIC_THRESHOLD", "1"))
-MESSAGE_TTL_HOURS = int(os.getenv("MESSAGE_TTL_HOURS", "12"))
+MESSAGE_TTL_MINUTES = int(os.getenv("MESSAGE_TTL_MINUTES", "1"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT_ID    = os.getenv("TELEGRAM_BOT_ID")
