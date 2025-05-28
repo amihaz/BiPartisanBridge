@@ -22,7 +22,7 @@ async def call_llm(prompt_text):
     """
     try:
         response = await openai_client.chat.completions.create(
-            model="deepseek/deepseek-chat:free",
+            model="deepseek/deepseek-chat",
             messages=[{"role": "user", "content": prompt_text}],
             temperature=0
         )
@@ -90,7 +90,10 @@ Messages:
         elif response_str.startswith('```'):
             response_str = response_str[3:-3].strip()
         
+        print(f"[DEBUG] response_str:\n", response_str)
+
         clusters = json.loads(response_str)
+        print(f"[DEBUG] clusters:\n", clusters)
 
     except Exception as e:
         print(f"[cluster_messages] Failed to parse LLM response: {e}")
@@ -103,14 +106,19 @@ Messages:
     valid_clusters = {}
     for title, items in clusters.items():
         unique_chans = {item["channel"] for item in items}
+        print("title: ", title)
+        print("unique_chans: ", unique_chans)
+        print("len(unique_chans): ", len(unique_chans))
+        print("topic_threshold: ", topic_threshold)
         if len(unique_chans) >= topic_threshold:
             valid_clusters[title] = items
+            print(f"[DEBUG] valid_clusters:\n", valid_clusters)
 
     return valid_clusters, id_map
 
 async def summarize_messages_llm(topic, messages_text):
     """
-    Summarize messages for a given topic
+    Summarize messages for a given topic. Answer always in the same language as the messages.
     
     Args:
         topic (str): The topic title
@@ -132,7 +140,7 @@ Summarize the following messages under topic '{topic}':
 
 async def create_unified_title_description_llm(topic, left_summary, right_summary):
     """
-    Create a balanced title and description from left and right summaries
+    Create a balanced title and description from left and right summaries. Answer always in the same language as the summaries.
     
     Args:
         topic (str): The topic title
@@ -152,16 +160,27 @@ Right summary:
 {right_summary}
 
 Create a balanced title and a neutral description for this topic.
-Return JSON: {{ "title": "...", "description": "..." }}
+Return a JSON object in the following format: {{ "title": "...", "description": "..." }}
 """
     
     unified_content = await call_llm(unified_prompt)
-    if not unified_content:
+
+    print(f"[DEBUG] unified_content:\n", unified_content)
+
+    response_str = unified_content.strip()
+    if response_str.startswith('```json'):
+        response_str = response_str[7:-3].strip()
+    elif response_str.startswith('```'):
+        response_str = response_str[3:-3].strip()
+    
+    print(f"[DEBUG] response_str:\n", response_str)
+
+    if not response_str:
         return {"title": topic, "description": "No description available"}
     
     try:
         # Try to parse as JSON first
-        unified_json = json.loads(unified_content.strip())
+        unified_json = json.loads(response_str.strip())
         return {
             "title": unified_json.get("title", topic),
             "description": unified_json.get("description", "")
