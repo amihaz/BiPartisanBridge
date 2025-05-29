@@ -94,17 +94,41 @@ async def summarize_loop():
                 print(f"[LOOP] Processing topic: {topic}")
                 
                 # Separate messages by left/right channels
-                left_msgs  = [id_map[it["id"]]["message"] for it in items if is_left_channel(it["channel"])]                
-                right_msgs = [id_map[it["id"]]["message"] for it in items if is_right_channel(it["channel"])]
-                
+                # left_msgs  = [id_map[it["id"]]["message"] for it in items if is_left_channel(it["channel"])]                
+                # right_msgs = [id_map[it["id"]]["message"] for it in items if is_right_channel(it["channel"])]
+                left_msgs = []
+                for it in items:
+                    ch = it["channel"]
+                    if is_left_channel(ch):
+                        print(f"[DBG] including LEFT  id={it['id']} channel={ch}")
+                        left_msgs.append(id_map[it["id"]]["message"])
+                    else:
+                        print(f"[DBG] skipping LEFT  id={it['id']} channel={ch}")
+
+                # Right
+                right_msgs = []
+                for it in items:
+                    ch = it["channel"]
+                    if is_right_channel(ch):
+                        print(f"[DBG] including RIGHT id={it['id']} channel={ch}")
+                        right_msgs.append(id_map[it["id"]]["message"])
+                    else:
+                        print(f"[DBG] skipping RIGHT id={it['id']} channel={ch}")  
+
                 print(f"[LOOP] Topic '{topic}': {len(left_msgs)} left msgs, {len(right_msgs)} right msgs")
 
                 # Generate summaries for each perspective
                 left_summary = ""
                 right_summary = ""
                 
-                if len(left_msgs) == 0 or len(right_msgs) == 0:
+                if len(left_msgs) == 0 and len(right_msgs) == 0:
                     print(f"[LOOP] No messages to summarize for topic: {topic}")
+                    continue
+                elif len(left_msgs) == 0:
+                    print(f"[LOOP] No left messages to summarize for topic: {topic}")
+                    continue
+                elif len(right_msgs) == 0:
+                    print(f"[LOOP] No right messages to summarize for topic: {topic}")
                     continue
 
                 print(f"[LOOP] Summarizing left messages for topic: {topic}")

@@ -61,7 +61,7 @@ async def cluster_messages_llm(entries, topic_threshold):
 
     # Create the clustering prompt
     cluster_prompt = f"""
-You are given a list of messages, each tagged with a unique ID and a channel.  
+You are given a list of messages, each tagged with a unique ID and a Channel.  
 Your job is to group them into topic clusters, but only keep those clusters that appear in at least {topic_threshold} different channels.
 
 **Requirements:**
